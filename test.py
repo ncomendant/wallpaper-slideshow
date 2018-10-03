@@ -1,10 +1,13 @@
 import pynput, keyboard, os
+from threading import Lock
 from tkinter import *
 from PIL import Image, ImageShow, ImageTk
 from random import shuffle
 from time import sleep
 
 supported_types = ['png', 'jpg', 'gif']
+
+lock = Lock()
 
 class App():
     def __init__(self):
@@ -16,12 +19,7 @@ class App():
         self._active = False
         self._paused = False
         self._dirty_path = None
-        self._dirty_awake = False
-
-        self._idleTime = 1000
-
-        path = self._image_manager.load_images(self._settings['directory'])
-        self._display.show_image(path, False)
+        self._awake_flag = False
 
         self._cooldown = self._settings['duration']
         self._remaining_wait = self._settings['wait']
@@ -29,55 +27,76 @@ class App():
         self._start_loop()
 
     def awake(self):
-        self._dirty_awake = True
+        lock.acquire()
+        self._awake_flag = True
+        lock.release()
     
-    def togglePause(self):
+    def toggle_pause(self):
         if (self._active == False):
             return
+        lock.acquire()
         self._paused = not self._paused
+        lock.release()
 
-    def toggleLabel(self):
+    def toggle_label(self):
         if (self._active == False):
             return
+        lock.acquire()
         self._display.toggleLabel()
+        lock.release()
+
+    def block_image(self):
+        if (self._active == False):
+            return
+        lock.acquire()
+        self._dirty_path = self._image_manager.block_image()
+        lock.release()
 
     def next(self):
         if (self._active == False):
             return
+        lock.acquire()
         self._dirty_path = self._image_manager.next()
+        lock.release()
 
     def back(self):
         if (self._active == False):
             return
+        lock.acquire()
         self._dirty_path = self._image_manager.back()
+        lock.release()
 
     def _start_loop(self):
         updateRate = 0.1
         while 1:
-            if self._dirty_awake == True:
-                self._dirty_awake = False
+            lock.acquire()
+            if self._awake_flag == True:
+                self._awake_flag = False
                 self._remaining_wait = self._settings['wait']
                 if (self._active):
                     self._display.hide()
                     self._active = False
 
             if self._active == True:
-                if (self._dirty_path != None):
+                if (self._paused == False):
+                    self._cooldown = self._cooldown - updateRate
+                    if self._cooldown <= 0 and self._dirty_path == None:
+                        self._dirty_path = self._image_manager.next()
+                if self._dirty_path != None:
                     self._cooldown = self._settings['duration']
                     self._display.show_image(self._dirty_path)
                     self._dirty_path = None
-                elif (self._paused == False):
-                    self._cooldown = self._cooldown - updateRate
-                    if self._cooldown <= 0:
-                        self._cooldown = self._settings['duration']
-                        path = self._image_manager.next()
-                        self._display.show_image(path)
                 self._display.update()
             else:
                 self._remaining_wait -= updateRate
                 if self._remaining_wait <= 0:
+                    self._input_manager.move_mouse_to_corner()
                     self._display.show()
+                    self._cooldown = self._settings['duration']
+                    path = self._image_manager.load_images(self._settings['directory'])
+                    self._display.show_image(path, False)
                     self._active = True
+            lock.release()
             sleep(updateRate)
 
     def _read_settings(self):
@@ -104,21 +123,29 @@ class InputManager():
 
     def __init__(self, app: App):
         self._app = app
+        self._mouse = pynput.mouse.Controller()
+        self._ignore_mouse_move = False
         self._add_listeners()
-        
 
     def _add_listeners(self):
         pynput.mouse.Listener.daemon = False
-        mouse_listener = pynput.mouse.Listener(on_move=self._on_mouse_move)
-        mouse_listener.start()
+        self._mouse_listener = pynput.mouse.Listener(on_move=self._on_mouse_move)
+        self._mouse_listener.start()
 
         keyboard.add_hotkey('left', self._app.back)
         keyboard.add_hotkey('right', self._app.next)
-        keyboard.add_hotkey('space', self._app.togglePause)
-        keyboard.add_hotkey('enter', self._app.toggleLabel)
+        keyboard.add_hotkey('space', self._app.toggle_pause)
+        keyboard.add_hotkey('enter', self._app.toggle_label)
+        keyboard.add_hotkey('tab', self._app.block_image)
+
+    def move_mouse_to_corner(self):
+        self._ignore_mouse_move = True
+        self._mouse.move(10000, 10000) #move cursor out of the way to bottom-right corner
+        self._ignore_mouse_move = False
 
     def _on_mouse_move(self, x, y):
-        self._app.awake()
+        if not self._ignore_mouse_move:
+            self._app.awake()
 
 class ImageManager():
 
@@ -126,16 +153,41 @@ class ImageManager():
         self._list = []
         self._history = []
 
-    def load_images(self, path):
+    def _read_blacklist(self):
+        file = open('blacklist.txt', 'r')
+        lines = file.read().split('\n')
+        file.close()
+        return lines
+
+    def block_image(self):
+        path = self._list[self._index]
+
+        file = open('blacklist.txt', 'a')
+        file.write(path + '\n')
+        file.close()
+
+        del self._list[self._index]
+        
+        if self._index >= len(self._list):
+            return self.next()
+        else:
+            return self._list[self._index]
+        
+
+    def load_images(self, path, blacklist = None):
+        if blacklist == None:
+            blacklist = self._read_blacklist()
+
         for file_name in os.listdir(path):
             full_path = path + '/' + file_name
-            
-            if (os.path.isdir(full_path)):
-                self.load_images(full_path)
-            else:
-                type = file_name.split('.')[-1]
-                if type in supported_types:
-                    self._list.append(full_path)
+
+            if full_path not in blacklist:
+                if (os.path.isdir(full_path)):
+                    self.load_images(full_path, blacklist)
+                else:
+                    type = file_name.split('.')[-1]
+                    if type in supported_types:
+                        self._list.append(full_path)
 
 
         self._index = 0
@@ -162,8 +214,8 @@ class Display():
         self._frame = self._make_frame()
         self._wrapper = self._make_wrapper()
         self._label = self._make_label()
-        self._labelVisible = True
-        self._labelDirty = False
+        self._label_visible = True
+        self._label_dirty = False
         self._image = None
 
         self.toggleLabel()
@@ -175,13 +227,13 @@ class Display():
             self._resize_image(self._frame.winfo_width(), self._frame.winfo_height())
 
     def toggleLabel(self):
-        self._labelDirty = True
+        self._label_dirty = True
 
     def update(self):
-        if (self._labelDirty == True):
-            self._labelVisible = not self._labelVisible
-            self._labelDirty = False
-            if (self._labelVisible == True):
+        if (self._label_dirty == True):
+            self._label_visible = not self._label_visible
+            self._label_dirty = False
+            if (self._label_visible == True):
                 self._label.place(relx=1.0, rely=1.0, x=-2, y=-2, anchor="se")
             else:
                 self._label.place_forget()
@@ -191,6 +243,7 @@ class Display():
 
     def show(self):
         self._frame.deiconify()
+        self._frame.focus_set()
 
     def hide(self):
         self._frame.withdraw()
@@ -227,20 +280,20 @@ class Display():
         image = self._image
         wrapper = self._wrapper
 
-        windowAspectRatio = width/height
-        imageAspectRatio = image.width/image.height
+        window_aspect_ratio = width/height
+        image_aspect_ratio = image.width/image.height
 
-        newWidth = None
-        newHeight = None
+        new_width = None
+        new_height = None
 
-        if imageAspectRatio < windowAspectRatio:
-            newWidth = int(height*imageAspectRatio)
-            newHeight = height
+        if image_aspect_ratio < window_aspect_ratio:
+            new_width = int(height*image_aspect_ratio)
+            new_height = height
         else:
-            newWidth = width
-            newHeight = int(width/imageAspectRatio)
+            new_width = width
+            new_height = int(width/image_aspect_ratio)
 
-        resizedImg = image.copy().resize((newWidth, newHeight), resample=Image.BICUBIC)
+        resizedImg = image.copy().resize((new_width, new_height), resample=Image.BICUBIC)
         photo = ImageTk.PhotoImage(resizedImg)
         wrapper.config(image = photo)
         wrapper.image = photo
