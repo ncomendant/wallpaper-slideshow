@@ -33,6 +33,11 @@ class App():
             return
         self._paused = not self._paused
 
+    def toggleLabel(self):
+        if (self._active == False):
+            return
+        self._display.toggleLabel()
+
     def next(self):
         if (self._active == False):
             return
@@ -94,6 +99,7 @@ class InputManager():
         keyboard.add_hotkey('left', self._app.back)
         keyboard.add_hotkey('right', self._app.next)
         keyboard.add_hotkey('space', self._app.togglePause)
+        keyboard.add_hotkey('enter', self._app.toggleLabel)
 
     def _on_mouse_move(self, x, y):
         self._app.awake()
@@ -138,16 +144,30 @@ class Display():
 
     def __init__(self):
         self._frame = self._make_frame()
+        self._wrapper = self._make_wrapper()
         self._label = self._make_label()
+        self._labelVisible = True
+        self._labelDirty = False
         self._image = None
-
 
     def show_image(self, path, resize: bool = True):
         self._image = self._read_image_file(path)
+        self._label.configure(text=path)
         if resize == True:
             self._resize_image(self._frame.winfo_width(), self._frame.winfo_height())
 
+    def toggleLabel(self):
+        self._labelDirty = True
+
     def update(self):
+        if (self._labelDirty == True):
+            self._labelVisible = not self._labelVisible
+            self._labelDirty = False
+            if (self._labelVisible == True):
+                self._label.place(relx=1.0, rely=1.0, x=-2, y=-2, anchor="se")
+            else:
+                self._label.place_forget()
+
         self._frame.update_idletasks()
         self._frame.update()
 
@@ -158,11 +178,16 @@ class Display():
         return frame
 
     def _make_label(self):
-        label = Label()
-        label.bind('<Configure>', self._on_resize)
-        label.configure(background='black')
-        label.pack(fill = BOTH, expand = YES)
+        label = Label(self._frame, text="(image path)", fg="red")
+        label.place(relx=1.0, rely=1.0, x=-2, y=-2, anchor="se")
         return label
+
+    def _make_wrapper(self):
+        wrapper = Label()
+        wrapper.bind('<Configure>', self._on_resize)
+        wrapper.configure(background='black')
+        wrapper.pack(fill = BOTH, expand = YES)
+        return wrapper
 
     def _read_image_file(self, path):
         try:
@@ -176,7 +201,7 @@ class Display():
 
     def _resize_image(self, width, height):
         image = self._image
-        label = self._label
+        wrapper = self._wrapper
 
         windowAspectRatio = width/height
         imageAspectRatio = image.width/image.height
@@ -193,7 +218,8 @@ class Display():
 
         resizedImg = image.copy().resize((newWidth, newHeight))
         photo = ImageTk.PhotoImage(resizedImg)
-        label.config(image = photo)
-        label.image = photo
+        wrapper.config(image = photo)
+        wrapper.image = photo
+        wrapper.pack()
 
 App()
