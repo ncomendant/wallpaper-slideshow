@@ -18,7 +18,7 @@ class App():
         self._dirtyPath = None
 
         path = self._image_manager.load_images(self._settings['directory'])
-        self._display.show_image(path)
+        self._display.show_image(path, False)
 
         self._cooldown = self._settings['duration']
 
@@ -32,7 +32,6 @@ class App():
         if (self._active == False):
             return
         self._paused = not self._paused
-        print(self._paused)
 
     def next(self):
         if (self._active == False):
@@ -55,7 +54,6 @@ class App():
                 elif (self._paused == False):
                     self._cooldown = self._cooldown - updateRate
                     if self._cooldown <= 0:
-                        print('change!')
                         self._cooldown = self._settings['duration']
                         path = self._image_manager.next()
                         self._display.show_image(path)
@@ -101,7 +99,6 @@ class InputManager():
         self._app.awake()
 
     def _on_key_press(self, key):
-        print(key)
         if key == keyboard.Key.space:
             self._app.togglePause() 
         elif key.char == 'a':
@@ -141,7 +138,6 @@ class ImageManager():
 
     def back(self):
         self._index -= 1
-        print(self._list[self._index])
         if (self._index < 0):
             self._index = 0
         return self._list[self._index]
@@ -155,9 +151,10 @@ class Display():
         self._image = None
 
 
-    def show_image(self, path):
+    def show_image(self, path, resize: bool = True):
         self._image = self._read_image_file(path)
-        self._resize_image(self._frame.winfo_width(), self._frame.winfo_height())
+        if resize == True:
+            self._resize_image(self._frame.winfo_width(), self._frame.winfo_height())
 
     def update(self):
         self._frame.update_idletasks()
@@ -190,9 +187,19 @@ class Display():
         image = self._image
         label = self._label
 
-        aspectRatio = image.width/image.height
-        newWidth = int(height*aspectRatio)
-        newHeight = height
+        windowAspectRatio = width/height
+        imageAspectRatio = image.width/image.height
+
+        newWidth = None
+        newHeight = None
+
+        if imageAspectRatio < windowAspectRatio:
+            newWidth = int(height*imageAspectRatio)
+            newHeight = height
+        else:
+            newWidth = width
+            newHeight = int(width/imageAspectRatio)
+
         resizedImg = image.copy().resize((newWidth, newHeight))
         photo = ImageTk.PhotoImage(resizedImg)
         label.config(image = photo)
