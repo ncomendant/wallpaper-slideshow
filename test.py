@@ -98,15 +98,6 @@ class InputManager():
     def _on_mouse_move(self, x, y):
         self._app.awake()
 
-    def _on_key_press(self, key):
-        if key == keyboard.Key.space:
-            self._app.togglePause() 
-        elif key.char == 'a':
-            self._app.back()
-        elif key.char == 'd':
-            self._app.next()
-        
-
 class ImageManager():
 
     def __init__(self):
