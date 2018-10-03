@@ -13,20 +13,23 @@ class App():
         self._image_manager = ImageManager()
         self._input_manager = InputManager(self)
         
-        self._active = True
+        self._active = False
         self._paused = False
-        self._dirtyPath = None
+        self._dirty_path = None
+        self._dirty_awake = False
+
+        self._idleTime = 1000
 
         path = self._image_manager.load_images(self._settings['directory'])
         self._display.show_image(path, False)
 
         self._cooldown = self._settings['duration']
+        self._remaining_wait = self._settings['wait']
 
         self._start_loop()
 
     def awake(self):
-        #TODO
-        pass
+        self._dirty_awake = True
     
     def togglePause(self):
         if (self._active == False):
@@ -41,21 +44,28 @@ class App():
     def next(self):
         if (self._active == False):
             return
-        self._dirtyPath = self._image_manager.next()
+        self._dirty_path = self._image_manager.next()
 
     def back(self):
         if (self._active == False):
             return
-        self._dirtyPath = self._image_manager.back()
+        self._dirty_path = self._image_manager.back()
 
     def _start_loop(self):
         updateRate = 0.1
         while 1:
-            if (self._active == True):
-                if (self._dirtyPath != None):
+            if self._dirty_awake == True:
+                self._dirty_awake = False
+                self._remaining_wait = self._settings['wait']
+                if (self._active):
+                    self._display.hide()
+                    self._active = False
+
+            if self._active == True:
+                if (self._dirty_path != None):
                     self._cooldown = self._settings['duration']
-                    self._display.show_image(self._dirtyPath)
-                    self._dirtyPath = None
+                    self._display.show_image(self._dirty_path)
+                    self._dirty_path = None
                 elif (self._paused == False):
                     self._cooldown = self._cooldown - updateRate
                     if self._cooldown <= 0:
@@ -63,12 +73,18 @@ class App():
                         path = self._image_manager.next()
                         self._display.show_image(path)
                 self._display.update()
-                sleep(updateRate)
+            else:
+                self._remaining_wait -= updateRate
+                if self._remaining_wait <= 0:
+                    self._display.show()
+                    self._active = True
+            sleep(updateRate)
 
     def _read_settings(self):
         file = open('settings.txt', 'r')
         lines = file.read().split('\n')
-        return {'directory': lines[0], 'duration': float(lines[1])}
+        file.close()
+        return {'directory': lines[0], 'duration': float(lines[1]), 'wait': float(lines[2])}
 
     def _list_files(self, path, list = []):
         for file_name in os.listdir(path):
@@ -150,6 +166,8 @@ class Display():
         self._labelDirty = False
         self._image = None
 
+        self.toggleLabel()
+
     def show_image(self, path, resize: bool = True):
         self._image = self._read_image_file(path)
         self._label.configure(text=path)
@@ -170,6 +188,12 @@ class Display():
 
         self._frame.update_idletasks()
         self._frame.update()
+
+    def show(self):
+        self._frame.deiconify()
+
+    def hide(self):
+        self._frame.withdraw()
 
     def _make_frame(self):
         frame = Tk()
@@ -216,7 +240,7 @@ class Display():
             newWidth = width
             newHeight = int(width/imageAspectRatio)
 
-        resizedImg = image.copy().resize((newWidth, newHeight))
+        resizedImg = image.copy().resize((newWidth, newHeight), resample=Image.BICUBIC)
         photo = ImageTk.PhotoImage(resizedImg)
         wrapper.config(image = photo)
         wrapper.image = photo
