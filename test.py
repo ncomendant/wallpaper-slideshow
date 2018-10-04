@@ -74,8 +74,7 @@ class App():
                 self._awake_flag = False
                 self._remaining_wait = self._settings['wait']
                 if (self._active):
-                    self._display.hide()
-                    self._active = False
+                    self._deactivate()
 
             if self._active == True:
                 if (self._paused == False):
@@ -84,20 +83,30 @@ class App():
                         self._dirty_path = self._image_manager.next()
                 if self._dirty_path != None:
                     self._cooldown = self._settings['duration']
-                    self._display.show_image(self._dirty_path)
+                    while self._display.show_image(self._dirty_path) == False:
+                        self._dirty_path = self._image_manager.next()
                     self._dirty_path = None
                 self._display.update()
             else:
                 self._remaining_wait -= updateRate
                 if self._remaining_wait <= 0:
-                    self._input_manager.move_mouse_to_corner()
-                    self._display.show()
-                    self._cooldown = self._settings['duration']
-                    path = self._image_manager.load_images(self._settings['directory'])
-                    self._display.show_image(path, False)
-                    self._active = True
+                    self._activate()    
             lock.release()
             sleep(updateRate)
+
+    def _activate(self):
+        self._settings = self._read_settings()
+        self._input_manager.move_mouse_to_corner()
+        self._cooldown = self._settings['duration']
+        path = self._image_manager.load_images(self._settings['directory'])
+        self._display.show()
+        while self._display.show_image(path, False) == False:
+            path = self._image_manager.next()
+        self._active = True
+
+    def _deactivate(self):
+        self._display.hide()
+        self._active = False
 
     def _read_settings(self):
         file = open('settings.txt', 'r')
@@ -224,7 +233,8 @@ class Display():
         self._image = self._read_image_file(path)
         self._label.configure(text=path)
         if resize == True:
-            self._resize_image(self._frame.winfo_width(), self._frame.winfo_height())
+            successful = self._resize_image(self._frame.winfo_width(), self._frame.winfo_height())
+            return successful
 
     def toggleLabel(self):
         self._label_dirty = True
@@ -293,10 +303,17 @@ class Display():
             new_width = width
             new_height = int(width/image_aspect_ratio)
 
-        resizedImg = image.copy().resize((new_width, new_height), resample=Image.BICUBIC)
-        photo = ImageTk.PhotoImage(resizedImg)
-        wrapper.config(image = photo)
-        wrapper.image = photo
-        wrapper.pack()
+        try:
+            resizedImg = image.copy().resize((new_width, new_height), resample=Image.BICUBIC)
+            photo = ImageTk.PhotoImage(resizedImg)
+            wrapper.config(image = photo)
+            wrapper.image = photo
+            wrapper.pack()
+        except Exception as a:
+            print(a)
+            return False
+
+        return True
+        
 
 App()
